@@ -7,25 +7,21 @@ it reads whatever is underneath: pronunciation plus dictionary definitions.
 Chinese, Japanese, Korean, French, Spanish, Italian and German; pick one from
 the globe button.
 
-This module is the app: window, capture, OCR and rendering.  Everything
-language-specific — tokenising, readings, lookup — lives in langs.py, and the
-lexicons it loads are built by build_dicts.py.
+This module is the app window and rendering.  Capture and OCR live in
+capture.py; language-specific tokenising, readings and lookup live in
+langs.py (lexicons built by build_dicts.py).
 """
 
 import json
 import math
 import sys
 import os
-import re
-import pickle
 import threading
 import traceback
 
 import AVFoundation
-import numpy
 import objc
 import Quartz
-import Vision
 from Foundation import (
     NSBundle,
     NSObject,
@@ -96,6 +92,7 @@ if ROOT not in sys.path:
 import langs
 
 from . import theme as _theme
+from .capture import recognize_under_window
 from .hotkey import GlobalHotKey, cmdKey, kVK_ANSI_E
 from .region_select import RegionSelectOverlay
 from .theme import (
@@ -403,10 +400,6 @@ def rounded_font(size, bold=False):
 
 
 # --------------------------------------------------------- dictionary ---
-
-#: langs.py owns tokenising, readings and lookup for every language.
-CJK_RE = langs.CJK_RE
-
 
 # ------------------------------------------------------------ drawing ---
 
@@ -802,214 +795,6 @@ class GripView(NSView):
 class PillButton(NSButton):
     def mouseDownCanMoveWindow(self):
         return False
-
-
-# ------------------------------------------------------------- capture ---
-
-
-def capture_below_window(win_number, screen_rect):
-    """Grab the pixels under `screen_rect`, excluding our own window."""
-    primary_h = NSScreen.screens()[0].frame().size.height
-    cg = Quartz.CGRectMake(
-        screen_rect.origin.x,
-        primary_h - (screen_rect.origin.y + screen_rect.size.height),
-        screen_rect.size.width,
-        screen_rect.size.height,
-    )
-    return Quartz.CGWindowListCreateImage(
-        cg,
-        Quartz.kCGWindowListOptionOnScreenBelowWindow,
-        win_number,
-        Quartz.kCGWindowImageBoundsIgnoreFraming | Quartz.kCGWindowImageBestResolution,
-    )
-
-
-def upscale(cgimg, factor):
-    if factor <= 1.001:
-        return cgimg
-    w = Quartz.CGImageGetWidth(cgimg)
-    h = Quartz.CGImageGetHeight(cgimg)
-    nw, nh = int(w * factor), int(h * factor)
-    cs = Quartz.CGColorSpaceCreateDeviceRGB()
-    ctx = Quartz.CGBitmapContextCreate(
-        None,
-        nw,
-        nh,
-        8,
-        0,
-        cs,
-        Quartz.kCGImageAlphaPremultipliedFirst | Quartz.kCGBitmapByteOrder32Little,
-    )
-    if ctx is None:
-        return cgimg
-    Quartz.CGContextSetInterpolationQuality(ctx, Quartz.kCGInterpolationHigh)
-    Quartz.CGContextDrawImage(ctx, Quartz.CGRectMake(0, 0, nw, nh), cgimg)
-    return Quartz.CGBitmapContextCreateImage(ctx)
-
-
-def _gray_array(cgimg):
-    """The image as a 2-D uint8 array; row 0 is the top of the image."""
-    w = Quartz.CGImageGetWidth(cgimg)
-    h = Quartz.CGImageGetHeight(cgimg)
-    ctx = Quartz.CGBitmapContextCreate(
-        None,
-        w,
-        h,
-        8,
-        0,
-        Quartz.CGColorSpaceCreateDeviceGray(),
-        Quartz.kCGImageAlphaNone,
-    )
-    if ctx is None:
-        return None
-    Quartz.CGContextDrawImage(ctx, Quartz.CGRectMake(0, 0, w, h), cgimg)
-    stride = Quartz.CGBitmapContextGetBytesPerRow(ctx)
-    buf = Quartz.CGBitmapContextGetData(ctx)
-    arr = numpy.frombuffer(buf.as_buffer(stride * h), dtype=numpy.uint8)
-    return arr.reshape(h, stride)[:, :w].copy()
-
-
-def _runs(flags, gap):
-    """Index ranges of consecutive True values, bridging gaps up to `gap`."""
-    out = []
-    start = None
-    for i, on in enumerate(flags):
-        if on and start is None:
-            start = i
-        elif not on and start is not None:
-            out.append([start, i])
-            start = None
-    if start is not None:
-        out.append([start, len(flags)])
-    merged = []
-    for r in out:
-        if merged and r[0] - merged[-1][1] <= gap:
-            merged[-1][1] = r[1]
-        else:
-            merged.append(r)
-    return merged
-
-
-def reflow_vertical(cgimg, max_cells=64):
-    """Turn a vertical-text image into a horizontal strip Vision can read.
-
-    Vision's Chinese recognizer only handles horizontal lines — a column of
-    stacked characters yields zero observations — but it reads isolated
-    characters perfectly.  So slice the columns into character cells and
-    paste them side by side in reading order (rightmost column first), which
-    also keeps enough context for language correction to help.
-    """
-    gray = _gray_array(cgimg)
-    if gray is None or min(gray.shape) < 12:
-        return None
-    border = numpy.concatenate([gray[0], gray[-1], gray[:, 0], gray[:, -1]])
-    ink = numpy.abs(gray.astype(numpy.int16) - int(numpy.median(border))) > 60
-    if not ink.any():
-        return None
-
-    cols = _runs(ink.sum(axis=0) > 0, gap=1)
-    if not cols:
-        return None
-    # Characters are square, so the widest raw band approximates one glyph;
-    # use it to bridge the white gaps inside characters like 川.
-    glyph = max(c[1] - c[0] for c in cols)
-    cols = _runs(ink.sum(axis=0) > 0, gap=max(1, int(glyph * 0.4)))
-    cols = [c for c in cols if (c[1] - c[0]) >= glyph * 0.5]
-    if not cols:
-        return None
-
-    cells = []
-    for x0, x1 in sorted(cols, key=lambda c: -c[0]):  # right to left
-        cw = x1 - x0
-        rows = _runs(ink[:, x0:x1].sum(axis=1) > 0, gap=1)
-        group = None
-        for y0, y1 in rows:
-            if group is not None and (y1 - group[0]) <= cw * 1.25:
-                group[1] = y1
-            else:
-                if group is not None:
-                    cells.append((x0, group[0], cw, group[1] - group[0]))
-                group = [y0, y1]
-        if group is not None:
-            cells.append((x0, group[0], cw, group[1] - group[0]))
-    if not 2 <= len(cells) <= max_cells:
-        return None
-
-    pad = max(4, glyph // 6)
-    strip_h = max(c[3] for c in cells) + 2 * pad
-    strip_w = sum(c[2] for c in cells) + pad * (len(cells) + 1)
-    ctx = Quartz.CGBitmapContextCreate(
-        None,
-        strip_w,
-        strip_h,
-        8,
-        0,
-        Quartz.CGColorSpaceCreateDeviceRGB(),
-        Quartz.kCGImageAlphaPremultipliedFirst | Quartz.kCGBitmapByteOrder32Little,
-    )
-    if ctx is None:
-        return None
-    Quartz.CGContextSetRGBFillColor(ctx, 1, 1, 1, 1)
-    Quartz.CGContextFillRect(ctx, Quartz.CGRectMake(0, 0, strip_w, strip_h))
-    x = pad
-    for cx, cy, cw, ch in cells:
-        piece = Quartz.CGImageCreateWithImageInRect(
-            cgimg, Quartz.CGRectMake(cx, cy, cw, ch)
-        )
-        Quartz.CGContextDrawImage(
-            ctx, Quartz.CGRectMake(x, (strip_h - ch) / 2.0, cw, ch), piece
-        )
-        x += cw + pad
-    return Quartz.CGBitmapContextCreateImage(ctx)
-
-
-def denoise(text):
-    """Drop stray single latin letters.
-
-    A tight frame clips the glyphs either side of the one you're aiming at,
-    and Vision reads those slivers as lone roman letters ("E說").  They never
-    reach the dictionary — segmentation keeps only the target script — but
-    they make the "read" line look wrong.  Only ever applied to CJK/Hangul
-    languages, where a lone roman letter is always noise.
-    """
-    if not text:
-        return text
-    return re.sub(r"(?<![0-9A-Za-z])[A-Za-z](?![0-9A-Za-z])", "", text).strip()
-
-
-def ocr_text(cgimg, lang):
-    """Return recognized text, ordered for horizontal or vertical layouts."""
-    req = Vision.VNRecognizeTextRequest.alloc().init()
-    req.setRecognitionLevel_(0)  # accurate
-    req.setRecognitionLanguages_(list(lang.ocr_langs))
-    req.setUsesLanguageCorrection_(True)
-    handler = Vision.VNImageRequestHandler.alloc().initWithCGImage_options_(cgimg, {})
-    ok, err = handler.performRequests_error_([req], None)
-    if not ok:
-        return ""
-    obs = req.results() or []
-    items = []
-    for o in obs:
-        cands = o.topCandidates_(1)
-        if not cands or len(cands) == 0:
-            continue
-        bb = o.boundingBox()
-        items.append((bb, cands[0].string()))
-    if not items:
-        return ""
-    tall = sum(1 for bb, _ in items if bb.size.height > bb.size.width * 1.3)
-    if lang.vertical_ok and tall > len(items) / 2.0:
-        # vertical CJK: columns run right to left
-        items.sort(key=lambda it: -it[0].origin.x)
-    else:
-        # Bucket into lines by text height before sorting left-to-right, so two
-        # fragments of the same line don't swap just because one sits a pixel
-        # higher than the other.
-        heights = sorted(bb.size.height for bb, _ in items)
-        band = max(heights[len(heights) // 2], 0.01)
-        items.sort(key=lambda it: (-int(it[0].origin.y / band), it[0].origin.x))
-    text = "".join(t for _, t in items)
-    return denoise(text) if lang.strip_stray_latin else text
 
 
 # ---------------------------------------------------------- results text ---
@@ -1681,23 +1466,9 @@ class Lens(NSObject):
                     Quartz.CGRequestScreenCaptureAccess()
                     err = "permission"
             else:
-                img = capture_below_window(win_no, lens_screen)
-                if img is None:
+                text = recognize_under_window(win_no, lens_screen, lang)
+                if text is None:
                     err = "permission"
-                else:
-                    h = Quartz.CGImageGetHeight(img)
-                    factor = 1.0
-                    if h < 300:
-                        factor = min(4.0, max(1.0, 300.0 / max(h, 1)))
-                    big = upscale(img, factor)
-                    text = ocr_text(big, lang)
-                    if lang.vertical_ok and len(CJK_RE.findall(text)) < 2:
-                        # probably a vertical speech bubble
-                        strip = reflow_vertical(big)
-                        if strip is not None:
-                            alt = ocr_text(strip, lang)
-                            if len(CJK_RE.findall(alt)) > len(CJK_RE.findall(text)):
-                                text = alt
         except Exception:
             err = traceback.format_exc()
         self._pending = (text, err, lang)

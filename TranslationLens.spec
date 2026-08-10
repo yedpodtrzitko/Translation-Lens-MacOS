@@ -49,9 +49,10 @@ a = Analysis(
     binaries=[],
     datas=datas,
     hiddenimports=[
-        "langs", "jieba", "pypinyin", "simplemma", "numpy",
+        "langs", "jieba", "pypinyin", "simplemma",
         "AVFoundation", "Vision", "Quartz", "AppKit", "Foundation", "objc",
         "translation_lens_macos", "translation_lens_macos.lens",
+        "translation_lens_macos.capture",
     ],
     excludes=["tkinter", "PyInstaller", "pytest", "setuptools", "pip"],
     noarchive=False,
