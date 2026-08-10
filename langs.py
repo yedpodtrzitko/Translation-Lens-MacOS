@@ -259,6 +259,22 @@ class Language(object):
         self.syllables = blob.get("syllables", {})
         self.ready = True
 
+    def unload(self):
+        """Drop the in-memory lexicon so another language can take the RAM.
+
+        Pickles expand roughly tenfold once unpickled; keeping every language
+        the user has ever selected resident adds up fast (Japanese alone is
+        ~200 MB).  The next ``load`` re-reads the pickle.
+        """
+        if not self.ready and not self.entries:
+            return
+        self.entries = {}
+        self.syllables = {}
+        self.maxlen = 1
+        if hasattr(self, "folded"):
+            self.folded = None
+        self.ready = False
+
     def has_script(self, text):
         return bool(WORD_RE.search(text))
 

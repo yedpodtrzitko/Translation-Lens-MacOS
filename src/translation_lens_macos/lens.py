@@ -1551,7 +1551,11 @@ class Lens(NSObject):
     def _pick_language(self, code):
         if code == self.lang.code:
             return
+        prev = self.lang
         self.lang = langs.get(code)
+        # Lexicons are large once unpickled; keep only the active one resident.
+        if prev is not self.lang:
+            prev.unload()
         save_settings(lang=code)
         self.refreshTitle()
         if self.lang.ready:
@@ -1582,6 +1586,9 @@ class Lens(NSObject):
             self.performSelectorOnMainThread_withObject_waitUntilDone_(
                 "readNow:", None, False
             )
+        else:
+            # Switched away while this pickle was loading — don't keep it.
+            lang.unload()
         del pool
 
     @objc.python_method
@@ -1770,6 +1777,9 @@ class Lens(NSObject):
                 attr(err, NSFont.userFixedPitchFontOfSize_(10), C_INK_SOFT)
             )
             self._expand_if_needed()
+            return
+        # Language may have changed (and the old lexicon unloaded) while OCR ran.
+        if lang is not self.lang:
             return
         self._last_text = text
         body, self._speakables = build_results(text, lang)
