@@ -44,13 +44,14 @@ def keep(dest):
 
 
 a = Analysis(
-    ["lens.py"],
-    pathex=[],
+    ["src/translation_lens_macos/__main__.py"],
+    pathex=["."],
     binaries=[],
     datas=datas,
     hiddenimports=[
         "langs", "jieba", "pypinyin", "simplemma", "numpy",
         "AVFoundation", "Vision", "Quartz", "AppKit", "Foundation", "objc",
+        "translation_lens_macos", "translation_lens_macos.lens",
     ],
     excludes=["tkinter", "PyInstaller", "pytest", "setuptools", "pip"],
     noarchive=False,

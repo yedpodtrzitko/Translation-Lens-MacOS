@@ -24,14 +24,18 @@ cp "$DIR/AppIcon.icns" "$APP/Contents/Resources/"
 cp "$VENV/bin/python$PYVER" "$APP/Contents/MacOS/python"
 
 # Make the in-bundle interpreter resolve to this venv: pyvenv.cfg sets
-# sys.prefix to Contents/, and the .pth adds the real site-packages.
+# sys.prefix to Contents/, and the .pth adds the real site-packages plus
+# the src/ layout (editable .pth files under the venv are not re-processed).
 sed "s|^command = .*|command = bundled|" "$VENV/pyvenv.cfg" > "$APP/Contents/pyvenv.cfg"
-echo "$SITE" > "$APP/Contents/lib/python$PYVER/site-packages/_translation.pth"
+{
+  echo "$SITE"
+  echo "$DIR/src"
+} > "$APP/Contents/lib/python$PYVER/site-packages/_translation.pth"
 
 cat > "$APP/Contents/MacOS/translation-lens" <<SH
 #!/bin/bash
 # keep a log so problems are diagnosable after the fact
-exec "\$(dirname "\$0")/python" "$DIR/lens.py" "\$@" >>"$DIR/data/lens.log" 2>&1
+exec "\$(dirname "\$0")/python" -m translation_lens_macos "\$@" >>"$DIR/data/lens.log" 2>&1
 SH
 chmod +x "$APP/Contents/MacOS/translation-lens"
 

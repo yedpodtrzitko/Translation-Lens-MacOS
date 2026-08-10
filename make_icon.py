@@ -10,7 +10,7 @@ from AppKit import (NSImage, NSBitmapImageRep, NSPNGFileType, NSColor,
                     NSBezierPath, NSGraphicsContext)
 from Foundation import NSMakeRect, NSMakeSize
 
-import lens
+import translation_lens_macos as lens
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ICONSET = os.path.join(HERE, "AppIcon.iconset")
