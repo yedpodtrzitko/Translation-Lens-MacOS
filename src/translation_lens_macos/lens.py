@@ -58,7 +58,7 @@ from AppKit import (
     NSWindowCollectionBehaviorCanJoinAllSpaces,
     NSWindowCollectionBehaviorFullScreenAuxiliary,
     NSWindowCollectionBehaviorStationary,
-    NSApplicationActivationPolicyRegular,
+    NSApplicationActivationPolicyAccessory,
     NSFontAttributeName,
     NSForegroundColorAttributeName,
     NSParagraphStyleAttributeName,
@@ -97,6 +97,7 @@ import langs
 
 from . import theme as _theme
 from .hotkey import GlobalHotKey, cmdKey, kVK_ANSI_E
+from .region_select import RegionSelectOverlay
 from .theme import (
     CORNER,
     DEFAULT_HUE,
@@ -1217,6 +1218,7 @@ class Lens(NSObject):
         self._busy = False
         self._speakables = []
         self._last_text = None
+        self._region_select = None
         return self
 
     # ---- construction -------------------------------------------------
@@ -1863,11 +1865,63 @@ class Lens(NSObject):
         self.win.orderOut_(None)
 
     def toggleLens_(self, sender):
-        """⌘E: hide if showing, show if hidden."""
+        """⌘E: hide if showing; region-select if hidden; cancel mid-select."""
+        if self._region_select is not None and self._region_select.is_active():
+            self._region_select.cancel()
+            return
         if self.win.isVisible():
             self.hideLens_(sender)
         else:
-            self.showLens_(sender)
+            self.beginRegionSelect_(sender)
+
+    def beginRegionSelect_(self, sender):
+        """Fullscreen crosshair drag to place the reading frame."""
+        self.win.orderOut_(None)
+        if self._region_select is None:
+            self._region_select = RegionSelectOverlay.alloc().init()
+        self._region_select.begin(
+            self._on_region_selected,
+            self._on_region_cancelled,
+            self._on_region_escaped,
+        )
+
+    @objc.python_method
+    def _on_region_selected(self, rect):
+        self.placeLensAtScreenRect_(rect)
+
+    @objc.python_method
+    def _on_region_cancelled(self):
+        NSApp.deactivate()
+
+    @objc.python_method
+    def _on_region_escaped(self):
+        """Esc during select: bring the lens back where it was."""
+        self.showLens_(None)
+        NSApp.deactivate()
+
+    def placeLensAtScreenRect_(self, rect):
+        """Size and park the reading frame so it matches screen rect `rect`."""
+        left = float(rect.origin.x)
+        top = float(rect.origin.y + rect.size.height)
+        w = max(FRAME_W_MIN, min(FRAME_W_MAX, float(rect.size.width)))
+        h = max(FRAME_H_MIN, min(FRAME_H_MAX, float(rect.size.height)))
+
+        if not self.expanded:
+            self.expanded = True
+            self._sync_toggle_icon()
+
+        self.resizeFrameTo_(NSMakeSize(w, h))
+
+        res_h = RESULTS_H if self.expanded else 0
+        origin = NSMakePoint(
+            left - FRAME_INSET,
+            (top - h) - (res_h + FRAME_PAD),
+        )
+        self._suppress_move += 1
+        self.win.setFrameOrigin_(origin)
+        self.showLens_(None)
+        self.endResize()
+        NSApp.deactivate()
 
     def recenterLens_(self, sender):
         """Park it in the middle of the screen — the way out of 'I lost it'."""
@@ -1895,6 +1949,7 @@ class AppDelegate(NSObject):
         so this is the reliable way back if it ever goes missing."""
         bar = NSStatusBar.systemStatusBar()
         self.status = bar.statusItemWithLength_(NSVariableStatusItemLength)
+        self.status.setAutosaveName_("TranslationLensStatusItem")
         size = 18.0
         icon = NSImage.alloc().initWithSize_(NSMakeSize(size, size))
         icon.lockFocus()
@@ -2112,7 +2167,7 @@ def main():
         raise SystemExit(selftest())
     start_logging()
     app = NSApplication.sharedApplication()
-    app.setActivationPolicy_(NSApplicationActivationPolicyRegular)
+    app.setActivationPolicy_(NSApplicationActivationPolicyAccessory)
     delegate = AppDelegate.alloc().init()
     app.setDelegate_(delegate)
     app.activateIgnoringOtherApps_(True)
