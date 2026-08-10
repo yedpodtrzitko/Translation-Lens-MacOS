@@ -21,7 +21,7 @@ dependencies = [
 ]
 
 [project.scripts]
-translation-lens-macos = "translation_lens_macos:main"
+tlens = "translation_lens_macos:main"
 
 [build-system]
 requires = ["uv_build>=0.12.1,<0.13.0"]
