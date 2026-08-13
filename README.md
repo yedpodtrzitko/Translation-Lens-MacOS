@@ -66,6 +66,7 @@ both run locally on your Mac.
 | Drag a handle on the frame | Resize it (see below) |
 | ⤢ | Quick sizes: Character · Word · Line · Bubble |
 | 🔍 | Read again without moving |
+| ↓ / ↑ | Flip the results panel above or below the lens |
 | ⌃ | Fold the results panel away, leaving just the frame |
 | ✕ | Hide to the menu-bar icon |
 | ⌘E | Show or hide the lens (works from any app) |

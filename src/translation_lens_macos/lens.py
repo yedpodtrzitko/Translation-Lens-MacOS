@@ -560,7 +560,7 @@ class ChromeView(NSView):
                 )
                 s.drawAtPoint_(
                     NSMakePoint(
-                        h.origin.x + h.size.width - 6 * 23 - 10 - s.size().width,
+                        h.origin.x + h.size.width - 7 * 23 - 10 - s.size().width,
                         h.origin.y + (h.size.height - s.size().height) / 2.0,
                     )
                 )
@@ -997,6 +997,7 @@ class Lens(NSObject):
         self.frame_h = float(cfg.get("frame_h", FRAME_H_DEFAULT))
         self.lang = langs.get(cfg.get("lang", "zh"))
         self.expanded = True
+        self.results_above = bool(cfg.get("results_above", False))
         self._suppress_move = 0
         self._move_timer = None
         self._pending = None
@@ -1073,12 +1074,19 @@ class Lens(NSObject):
         self.btnToggle = self._button(
             "chevron.up", "▾", "toggleResults:", "Show / hide results"
         )
+        self.btnPos = self._button(
+            "rectangle.bottomhalf.filled",
+            "↓",
+            "toggleResultsPos:",
+            "Results above / below lens",
+        )
         self.btnClose = self._button("xmark", "✕", "hideLens:", "Hide to menu bar")
         for b in (
             self.btnTheme,
             self.btnLang,
             self.btnSize,
             self.btnRead,
+            self.btnPos,
             self.btnToggle,
             self.btnClose,
         ):
@@ -1120,6 +1128,7 @@ class Lens(NSObject):
         self.refreshTitle()
         self.layout()
         self._sync_toggle_icon()
+        self._sync_pos_icon()
         NSNotificationCenter.defaultCenter().addObserver_selector_name_object_(
             self, "windowMoved:", "NSWindowDidMoveNotification", win
         )
@@ -1161,9 +1170,16 @@ class Lens(NSObject):
         band_h = self.frame_h + 2 * FRAME_PAD
         H = HEADER_H + band_h + res_h
 
-        header = NSMakeRect(0, band_h + res_h, W, HEADER_H)
-        frame = NSMakeRect(FRAME_INSET, res_h + FRAME_PAD, self.frame_w, self.frame_h)
-        panel = NSMakeRect(0, 0, W, res_h)
+        if self.results_above:
+            frame = NSMakeRect(FRAME_INSET, FRAME_PAD, self.frame_w, self.frame_h)
+            header = NSMakeRect(0, band_h, W, HEADER_H)
+            panel = NSMakeRect(0, band_h + HEADER_H, W, res_h)
+            scroll_y = band_h + HEADER_H + 2
+        else:
+            header = NSMakeRect(0, band_h + res_h, W, HEADER_H)
+            frame = NSMakeRect(FRAME_INSET, res_h + FRAME_PAD, self.frame_w, self.frame_h)
+            panel = NSMakeRect(0, 0, W, res_h)
+            scroll_y = 2
 
         self.chrome.header_rect = header
         self.chrome.frame_rect = frame
@@ -1177,6 +1193,7 @@ class Lens(NSObject):
         for b in (
             self.btnClose,
             self.btnToggle,
+            self.btnPos,
             self.btnRead,
             self.btnSize,
             self.btnLang,
@@ -1185,7 +1202,7 @@ class Lens(NSObject):
             bx -= 23
             b.setFrame_(NSMakeRect(bx, header.origin.y + 6, 22, 22))
 
-        self.scroll.setFrame_(NSMakeRect(2, 2, W - 4, max(res_h - 4, 0)))
+        self.scroll.setFrame_(NSMakeRect(2, scroll_y, W - 4, max(res_h - 4, 0)))
         self.scroll.setHidden_(res_h == 0)
 
         # Handles scale with the frame, so a character-sized frame isn't
@@ -1207,6 +1224,33 @@ class Lens(NSObject):
         self.gripBottom.setFrame_(NSMakeRect(mid_x - hlen / 2, bottom - 5, hlen, 10))
 
         self._set_window_height(H, W)
+
+    @objc.python_method
+    def _frame_screen_bottom(self):
+        f = self.win.frame()
+        return f.origin.y + self.chrome.frame_rect.origin.y
+
+    @objc.python_method
+    def _pin_frame_screen_bottom(self, screen_bottom):
+        f = self.win.frame()
+        new_y = screen_bottom - self.chrome.frame_rect.origin.y
+        if abs(new_y - f.origin.y) > 0.5:
+            self._suppress_move += 1
+            self.win.setFrameOrigin_(NSMakePoint(f.origin.x, new_y))
+
+    @objc.python_method
+    def _layout_keeping_lens(self):
+        """Relayout while keeping the reading frame on the same screen pixels."""
+        bottom = self._frame_screen_bottom()
+        self.layout()
+        self._pin_frame_screen_bottom(bottom)
+
+    @objc.python_method
+    def _relayout(self):
+        if self.results_above:
+            self._layout_keeping_lens()
+        else:
+            self.layout()
 
     @objc.python_method
     def _set_window_height(self, H, W):
@@ -1290,6 +1334,7 @@ class Lens(NSObject):
             self.btnLang,
             self.btnSize,
             self.btnRead,
+            self.btnPos,
             self.btnToggle,
             self.btnClose,
         ):
@@ -1563,7 +1608,7 @@ class Lens(NSObject):
         if not self.expanded:
             self.expanded = True
             self._sync_toggle_icon()
-            self.layout()
+            self._relayout()
 
     @objc.python_method
     def _sync_toggle_icon(self):
@@ -1580,6 +1625,28 @@ class Lens(NSObject):
             pass
         self.btnToggle.setAttributedTitle_(
             attr("▾" if self.expanded else "▴", rounded_font(13, True), C_TITLE)
+        )
+
+    @objc.python_method
+    def _sync_pos_icon(self):
+        name = (
+            "rectangle.tophalf.filled"
+            if self.results_above
+            else "rectangle.bottomhalf.filled"
+        )
+        try:
+            img = NSImage.imageWithSystemSymbolName_accessibilityDescription_(
+                name, "results position"
+            )
+            if img is not None:
+                img.setTemplate_(True)
+                self.btnPos.setImage_(img)
+                self.btnPos.setTitle_("")
+                return
+        except Exception:
+            pass
+        self.btnPos.setAttributedTitle_(
+            attr("↑" if self.results_above else "↓", rounded_font(13, True), C_TITLE)
         )
 
     def textView_clickedOnLink_atIndex_(self, view, link, index):
@@ -1694,10 +1761,11 @@ class Lens(NSObject):
         self.resizeFrameTo_(NSMakeSize(w, h))
 
         res_h = RESULTS_H if self.expanded else 0
-        origin = NSMakePoint(
-            left - FRAME_INSET,
-            (top - h) - (res_h + FRAME_PAD),
-        )
+        if self.results_above:
+            origin_y = (top - h) - FRAME_PAD
+        else:
+            origin_y = (top - h) - (res_h + FRAME_PAD)
+        origin = NSMakePoint(left - FRAME_INSET, origin_y)
         self._suppress_move += 1
         self.win.setFrameOrigin_(origin)
         self.showLens_(None)
@@ -1720,7 +1788,13 @@ class Lens(NSObject):
     def toggleResults_(self, sender):
         self.expanded = not self.expanded
         self._sync_toggle_icon()
-        self.layout()
+        self._relayout()
+
+    def toggleResultsPos_(self, sender):
+        self.results_above = not self.results_above
+        save_settings(results_above=self.results_above)
+        self._sync_pos_icon()
+        self._layout_keeping_lens()
 
 
 class AppDelegate(NSObject):
