@@ -9,7 +9,7 @@ the globe button.
 
 This module is the app window and rendering.  Capture and OCR live in
 capture.py; language-specific tokenising, readings and lookup live in
-langs.py (lexicons built by build_dicts.py).
+langs (lexicons built by build_dicts.py).
 """
 
 import json
@@ -83,14 +83,8 @@ from AppKit import (
     NSRectFillUsingOperation,
 )
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-#: repo root when laid out as src/translation_lens_macos/lens.py
-ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
-if ROOT not in sys.path:
-    sys.path.insert(0, ROOT)
 
-import langs
-
+from . import langs
 from . import theme as _theme
 from .capture import recognize_under_window
 from .hotkey import GlobalHotKey, cmdKey, kVK_ANSI_E
@@ -125,8 +119,11 @@ if FROZEN:
     SUPPORT = os.path.expanduser("~/Library/Application Support/Translation Lens")
     LOG_PATH = os.path.expanduser("~/Library/Logs/Translation Lens.log")
 else:
+    HERE = os.path.dirname(os.path.abspath(__file__))
+    ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
     SUPPORT = os.path.join(ROOT, "data")
     LOG_PATH = None
+
 os.makedirs(SUPPORT, exist_ok=True)
 SETTINGS = os.path.join(SUPPORT, "settings.json")
 
@@ -249,7 +246,7 @@ SPEAK_RATE_SLOW = 0.30
 PREFER_GENDER = 2
 
 
-class Speaker(object):
+class Speaker:
     """Speaks a word in the language it belongs to."""
 
     def __init__(self):

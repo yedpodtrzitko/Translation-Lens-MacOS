@@ -230,7 +230,7 @@ before shipping.
 
 ```
 lens.py           the app — window, capture, OCR, rendering (macOS only)
-langs.py          per-language tokenising, readings and lookup
+langs.py          per-language tokenising, readings and lookup (in the package)
 build_dicts.py    normalizes raw dictionaries into data/lex-*.pickle
 fetch_dicts.sh    re-downloads the sources and rebuilds the lexicons
 TranslationLens.spec   PyInstaller recipe for the shippable app
@@ -243,7 +243,7 @@ data/settings.json remembers your language and frame size
 .venv/            dependencies
 ```
 
-To add another language, add a `Language` subclass in `langs.py` plus a builder
+To add another language, add a `Language` subclass in `src/translation_lens_macos/langs.py` plus a builder
 in `build_dicts.py`. Vision can also recognize Russian, Ukrainian, Thai,
 Vietnamese and Cantonese. Languages Vision cannot read at all — Devanagari, so
 no Hindi — would need a different OCR engine.

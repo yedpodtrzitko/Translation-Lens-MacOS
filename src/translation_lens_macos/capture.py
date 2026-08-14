@@ -1,19 +1,12 @@
 """Screen capture, preprocessing and Vision OCR for the reading lens."""
 
 import re
-import sys
-import os
 
 import Quartz
 import Vision
 from AppKit import NSScreen
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
-if ROOT not in sys.path:
-    sys.path.insert(0, ROOT)
-
-import langs
+from . import langs
 
 CJK_RE = langs.CJK_RE
 

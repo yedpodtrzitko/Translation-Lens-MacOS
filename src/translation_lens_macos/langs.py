@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """Language packs for Translation Lens.
 
 Each pack knows which languages to hand Vision, how to cut recognized text
@@ -16,9 +14,11 @@ import sys
 import unicodedata
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+#: repo root when laid out as src/translation_lens_macos/langs.py
+_ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 
 #: when frozen by PyInstaller the lexicons live in the bundle's temp tree
-DATA = os.path.join(getattr(sys, "_MEIPASS", HERE), "data")
+DATA = os.path.join(getattr(sys, "_MEIPASS", _ROOT), "data")
 
 MAX_SENSES = 3
 
@@ -26,7 +26,7 @@ MAX_SENSES = 3
 MAX_READINGS = 4
 
 
-class Reading(object):
+class Reading:
     """One pronunciation of a word, and how to make a synthesizer say it."""
     __slots__ = ("parts", "label", "speech")
 
@@ -36,7 +36,7 @@ class Reading(object):
         self.speech = speech      # text to hand the synthesizer, or None
 
 
-class Entry(object):
+class Entry:
     """One dictionary sense-group for a word."""
     __slots__ = ("headword", "readings", "glosses", "note")
 
@@ -47,7 +47,7 @@ class Entry(object):
         self.note = note
 
 
-class Word(object):
+class Word:
     """A token from the page plus whatever the dictionary knows about it."""
     __slots__ = ("surface", "entries")
 
@@ -227,7 +227,7 @@ def fold_diacritics(text):
                    if not unicodedata.combining(c)).lower()
 
 
-class Language(object):
+class Language:
     code = ""
     label = ""
     native = ""
