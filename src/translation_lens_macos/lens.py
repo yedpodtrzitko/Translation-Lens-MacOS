@@ -7,9 +7,9 @@ it reads whatever is underneath: pronunciation plus dictionary definitions.
 Chinese, Japanese, Korean, French, Spanish, Italian and German; pick one from
 the globe button.
 
-This module is the app window and rendering.  Capture and OCR live in
-capture.py; language-specific tokenising, readings and lookup live in
-langs (lexicons built by build_dicts.py).
+This module is the app window.  Capture and OCR live in capture.py;
+language-specific tokenising, readings and lookup live in langs (lexicons
+built by build_dicts.py); the results panel text lives in results.py.
 """
 
 import json
@@ -30,7 +30,6 @@ from Foundation import (
     NSMakePoint,
     NSAutoreleasePool,
     NSNotificationCenter,
-    NSMutableAttributedString,
     NSAttributedString,
 )
 from AppKit import (
@@ -57,20 +56,14 @@ from AppKit import (
     NSApplicationActivationPolicyAccessory,
     NSFontAttributeName,
     NSForegroundColorAttributeName,
-    NSParagraphStyleAttributeName,
-    NSMutableParagraphStyle,
     NSViewWidthSizable,
     NSViewHeightSizable,
     NSMenu,
     NSMenuItem,
     NSButtonTypeMomentaryChange,
-    NSLineBreakByWordWrapping,
-    NSTextAttachment,
     NSCursor,
     NSCursorAttributeName,
     NSLinkAttributeName,
-    NSImageSymbolConfiguration,
-    NSCompositingOperationSourceAtop,
     NSColorPanel,
     NSColorSpace,
     NSTrackingArea,
@@ -79,8 +72,6 @@ from AppKit import (
     NSTrackingActiveAlways,
     NSStatusBar,
     NSVariableStatusItemLength,
-    NSCompositingOperationSourceOver,
-    NSRectFillUsingOperation,
 )
 
 
@@ -89,6 +80,15 @@ from . import theme as _theme
 from .capture import recognize_under_window
 from .hotkey import GlobalHotKey, cmdKey, kVK_ANSI_E
 from .region_select import RegionSelectOverlay
+from .results import (
+    attr,
+    build_results,
+    credits_text,
+    make_para,
+    permission_notice,
+    rounded_font,
+    welcome,
+)
 from .theme import (
     CORNER,
     DEFAULT_HUE,
@@ -105,7 +105,6 @@ from .theme import (
     PRESETS,
     RESULTS_H,
     THEMES,
-    TONE_COLORS,
     WIN_W_MIN,
     rgb,
     theme_swatch,
@@ -177,65 +176,6 @@ def set_theme(hue, sat=1.0):
 
 set_theme(DEFAULT_HUE, DEFAULT_SAT)
 
-_speaker_icon = {}  # tinted glyphs, cleared whenever the theme changes
-_theme.on_change(_speaker_icon.clear)
-
-# --------------------------------------------------------------- credits ---
-
-#: Shown by Help -> Licenses & Credits.  The dictionaries are all share-alike
-#: licensed, which obliges any distributed build to carry this attribution.
-CREDITS = [
-    (
-        "Translation Lens",
-        "Reading lens for Chinese, Japanese, Korean, French, "
-        "Spanish, Italian and German.",
-    ),
-    (
-        "Dictionary data — CC BY-SA 4.0",
-        "Chinese: CC-CEDICT (mdbg.net).\n"
-        "Japanese: JMdict/EDICT, Electronic Dictionary Research and Development "
-        "Group (edrdg.org).\n"
-        "Korean: English Wiktionary, extracted by kaikki.org.\n"
-        "French, Spanish, Italian, German: WikDict (wikdict.com), from "
-        "Wiktionary.\n\n"
-        "These dictionaries are licensed CC BY-SA 4.0. The lexicon files shipped "
-        "with this app are adaptations of them and remain under the same license; "
-        "they are available on request.",
-    ),
-    (
-        "Software libraries",
-        "jieba (MIT) — Chinese word segmentation.\n"
-        "pypinyin (MIT) — pinyin readings.\n"
-        "simplemma (MIT) — lemmatisation.\n"
-        "PyObjC (MIT), NumPy (BSD), Python (PSF).",
-    ),
-    (
-        "System frameworks",
-        "Text recognition uses Apple's Vision framework; speech uses "
-        "AVSpeechSynthesizer. Both run on-device — no text leaves your Mac.",
-    ),
-]
-
-
-def credits_text():
-    s = NSMutableAttributedString.alloc().init()
-    for title, body in CREDITS:
-        s.appendAttributedString_(
-            attr(
-                title + "\n",
-                rounded_font(13, True),
-                C_DEEP,
-                make_para(before=8, after=3),
-            )
-        )
-        s.appendAttributedString_(
-            attr(
-                body + "\n", rounded_font(11), C_INK_SOFT, make_para(lead=2.5, after=4)
-            )
-        )
-    return s
-
-
 # ----------------------------------------------------------------- tts ---
 
 #: default is 0.5; a touch slower is easier to imitate when learning
@@ -306,56 +246,6 @@ class Speaker:
 SPEAKER = Speaker()
 
 
-def speaker_icon(size=11.0):
-    """A small pink speaker glyph for inline use in the results panel."""
-    if size in _speaker_icon:
-        return _speaker_icon[size]
-    img = None
-    try:
-        base = NSImage.imageWithSystemSymbolName_accessibilityDescription_(
-            "speaker.wave.2.fill", "speak"
-        )
-        if base is not None:
-            cfg = NSImageSymbolConfiguration.configurationWithPointSize_weight_scale_(
-                size, 0, 1
-            )
-            base = base.imageWithSymbolConfiguration_(cfg)
-            r = NSMakeRect(0, 0, base.size().width, base.size().height)
-            img = NSImage.alloc().initWithSize_(base.size())
-            img.lockFocus()
-            base.drawInRect_fromRect_operation_fraction_(
-                r, NSMakeRect(0, 0, 0, 0), NSCompositingOperationSourceOver, 1.0
-            )
-            C_DEEP.set()
-            NSRectFillUsingOperation(r, NSCompositingOperationSourceAtop)
-            img.unlockFocus()
-    except Exception:
-        img = None
-    _speaker_icon[size] = img
-    return img
-
-
-def speak_link(index, size=11.0):
-    """Clickable speaker icon; the link carries an index into `speakables`."""
-    img = speaker_icon(size)
-    if img is None:
-        piece = NSMutableAttributedString.alloc().initWithString_("♪")
-    else:
-        att = NSTextAttachment.alloc().init()
-        att.setImage_(img)
-        piece = NSMutableAttributedString.alloc().initWithAttributedString_(
-            NSAttributedString.attributedStringWithAttachment_(att)
-        )
-    piece.addAttributes_range_(
-        {
-            NSLinkAttributeName: "speak:%d" % index,
-            NSCursorAttributeName: NSCursor.pointingHandCursor(),
-        },
-        (0, piece.length()),
-    )
-    return piece
-
-
 # ------------------------------------------------------------ settings ---
 
 
@@ -376,27 +266,6 @@ def save_settings(**kw):
     except Exception:
         pass
 
-
-# --------------------------------------------------------------- fonts ---
-
-
-def rounded_font(size, bold=False):
-    weight = 0.4 if bold else 0.0
-    base = NSFont.systemFontOfSize_weight_(size, weight)
-    try:
-        desc = base.fontDescriptor().fontDescriptorWithDesign_(
-            "NSCTFontUIFontDesignRounded"
-        )
-        if desc is not None:
-            f = NSFont.fontWithDescriptor_size_(desc, size)
-            if f is not None:
-                return f
-    except Exception:
-        pass
-    return base
-
-
-# --------------------------------------------------------- dictionary ---
 
 # ------------------------------------------------------------ drawing ---
 
@@ -794,192 +663,6 @@ class PillButton(NSButton):
         return False
 
 
-# ---------------------------------------------------------- results text ---
-
-
-def attr(text, font, color, para=None):
-    d = {NSFontAttributeName: font, NSForegroundColorAttributeName: color}
-    if para is not None:
-        d[NSParagraphStyleAttributeName] = para
-    return NSAttributedString.alloc().initWithString_attributes_(text, d)
-
-
-def make_para(head=0.0, before=0.0, after=0.0, lead=2.0):
-    p = NSMutableParagraphStyle.alloc().init()
-    p.setHeadIndent_(head)
-    p.setFirstLineHeadIndent_(0.0)
-    p.setParagraphSpacingBefore_(before)
-    p.setParagraphSpacing_(after)
-    p.setLineSpacing_(lead)
-    p.setLineBreakMode_(NSLineBreakByWordWrapping)
-    return p
-
-
-def word_font(lang, size):
-    if lang.font_name:
-        f = NSFont.fontWithName_size_(lang.font_name, size)
-        if f is not None:
-            return f
-    return rounded_font(size, True)
-
-
-def build_results(raw_text, lang):
-    """-> (attributed string, speakables)
-
-    `speakables` is what the speaker icons point at: index -> (text, voice).
-    """
-    out = NSMutableAttributedString.alloc().init()
-    speakables = []
-
-    said = set()
-
-    def add_speaker(text, group=None):
-        if not lang.tts_lang or not text:
-            return
-        key = (group, text.lower())
-        if group is not None and key in said:
-            return  # same pronunciation, already has an icon
-        said.add(key)
-        speakables.append((text, lang.tts_lang))
-        out.appendAttributedString_(attr(" ", rounded_font(11), C_INK_SOFT))
-        out.appendAttributedString_(speak_link(len(speakables) - 1))
-
-    if not raw_text.strip():
-        out.appendAttributedString_(
-            attr(
-                "( ˃̣̣̥ ⌓ ˂̣̣̥ )  nothing found\n",
-                rounded_font(15, True),
-                C_DEEP,
-                make_para(after=4),
-            )
-        )
-        out.appendAttributedString_(
-            attr(
-                "Try covering a bit less text, zooming the page in, or nudging the "
-                "frame so a whole line sits inside it. Check the language in the "
-                "title bar matches the page, too.",
-                rounded_font(11.5),
-                C_INK_SOFT,
-                make_para(lead=3),
-            )
-        )
-        return out, speakables
-
-    out.appendAttributedString_(attr("read  ", rounded_font(10, True), C_DEEP))
-    out.appendAttributedString_(
-        attr(raw_text, word_font(lang, 14), C_INK, make_para(after=9, lead=3))
-    )
-    add_speaker(raw_text)
-    out.appendAttributedString_(
-        attr("\n", word_font(lang, 14), C_INK, make_para(after=9, lead=3))
-    )
-
-    if not lang.has_script(raw_text):
-        out.appendAttributedString_(
-            attr(
-                "No %s text in that — the frame may be over artwork, or the "
-                "language picker may be set wrong." % lang.label,
-                rounded_font(11.5),
-                C_INK_SOFT,
-                make_para(lead=3),
-            )
-        )
-        return out, speakables
-
-    if not lang.ready:
-        out.appendAttributedString_(
-            attr(
-                "loading the %s dictionary, one sec…" % lang.label,
-                rounded_font(11.5),
-                C_INK_SOFT,
-            )
-        )
-        return out, speakables
-
-    para_word = make_para(head=26, before=8, after=1, lead=0)
-    para_def = make_para(head=26, after=2, lead=2.0)
-
-    for word in lang.words(raw_text):
-        if not word.entries:
-            out.appendAttributedString_(
-                attr(word.surface + "  ", word_font(lang, 20), C_INK, para_word)
-            )
-            out.appendAttributedString_(
-                attr(
-                    "not in the dictionary\n", rounded_font(10.5), C_INK_SOFT, para_word
-                )
-            )
-            continue
-
-        for n, entry in enumerate(word.entries):
-            # Headword and pronunciation share a line, so a speech bubble's
-            # worth of vocabulary fits without scrolling.
-            if n == 0:
-                out.appendAttributedString_(
-                    attr(word.surface + "  ", word_font(lang, 20), C_INK, para_word)
-                )
-            else:
-                out.appendAttributedString_(
-                    attr("or  ", rounded_font(10), C_INK_SOFT, para_word)
-                )
-
-            # Each pronunciation gets its own speaker, so a word with several
-            # readings (那个 nà ge / nèi ge) can be heard either way.
-            for r, reading in enumerate(entry.readings):
-                if r:
-                    out.appendAttributedString_(
-                        attr("  · ", rounded_font(11), C_INK_SOFT, para_word)
-                    )
-                if reading.label:
-                    out.appendAttributedString_(
-                        attr(
-                            reading.label + " ", rounded_font(11), C_INK_SOFT, para_word
-                        )
-                    )
-                for i, (text, tone) in enumerate(reading.parts):
-                    if i:
-                        out.appendAttributedString_(
-                            attr(" ", rounded_font(14.5), C_INK_SOFT, para_word)
-                        )
-                    if tone in ("romaji", "label"):
-                        out.appendAttributedString_(
-                            attr(text, rounded_font(13), C_INK_SOFT, para_word)
-                        )
-                    else:
-                        color = TONE_COLORS.get(tone, C_DEEP)
-                        out.appendAttributedString_(
-                            attr(text, rounded_font(14.5, True), color, para_word)
-                        )
-                add_speaker(reading.speech, group=id(word))
-
-            if entry.note:
-                out.appendAttributedString_(
-                    attr("  " + entry.note, word_font(lang, 12), C_INK_SOFT, para_word)
-                )
-            out.appendAttributedString_(attr("\n", rounded_font(5), C_INK, para_word))
-
-            for gloss in entry.glosses:
-                out.appendAttributedString_(
-                    attr(
-                        "· " + lang.clean_gloss(gloss) + "\n",
-                        rounded_font(11.5),
-                        C_INK_SOFT,
-                        para_def,
-                    )
-                )
-
-    if lang.code == "zh":
-        out.appendAttributedString_(
-            attr("\ntones:  ", rounded_font(9.5, True), C_INK_SOFT, make_para(before=8))
-        )
-        for n, label in ((1, "1 ā"), (2, "2 á"), (3, "3 ǎ"), (4, "4 à"), (5, "5 a")):
-            out.appendAttributedString_(
-                attr(label + "   ", rounded_font(9.5, True), TONE_COLORS[n])
-            )
-    return out, speakables
-
-
-# ------------------------------------------------------------- the app ---
 # ------------------------------------------------------------- the app ---
 
 
@@ -1344,7 +1027,7 @@ class Lens(NSObject):
     def rerender(self):
         """Redraw the results panel with the current palette."""
         if self._last_text is None:
-            body = _welcome(self.lang)
+            body = welcome(self.lang)
             self._speakables = []
         else:
             body, self._speakables = build_results(self._last_text, self.lang)
@@ -1524,65 +1207,9 @@ class Lens(NSObject):
         self.chrome.busy = False
         self.chrome.setNeedsDisplay_(True)
         text, err, lang = self._pending or ("", None, self.lang)
-        if err in ("translocated", "volume"):
-            body = NSMutableAttributedString.alloc().init()
-            body.appendAttributedString_(
-                attr(
-                    "Please move Translation Lens to Applications\n",
-                    rounded_font(14, True),
-                    C_DEEP,
-                    make_para(after=5),
-                )
-            )
-            where = (
-                "the disk image"
-                if err == "volume"
-                else "a temporary location macOS created for it"
-            )
-            body.appendAttributedString_(
-                attr(
-                    "Translation Lens is running from %s, and macOS will not "
-                    "remember the Screen Recording permission for an app there — "
-                    "you can grant it, but it is forgotten immediately.\n\n"
-                    "To fix it for good:\n"
-                    "1.  Quit Translation Lens.\n"
-                    "2.  Drag Translation Lens into your Applications folder.\n"
-                    "3.  Open it from Applications and allow Screen Recording.\n"
-                    "4.  Quit and open it once more.\n\n"
-                    "If it still asks after that, open Terminal and run:\n"
-                    'xattr -dr com.apple.quarantine "/Applications/Translation Lens.app"'
-                    % where,
-                    rounded_font(11.5),
-                    C_INK_SOFT,
-                    make_para(lead=3),
-                )
-            )
+        if err in ("translocated", "volume", "permission"):
             self._speakables = []
-            self.text.textStorage().setAttributedString_(body)
-            self._expand_if_needed()
-            return
-        if err == "permission":
-            body = NSMutableAttributedString.alloc().init()
-            body.appendAttributedString_(
-                attr(
-                    "Screen Recording permission needed\n",
-                    rounded_font(14, True),
-                    C_DEEP,
-                    make_para(after=5),
-                )
-            )
-            body.appendAttributedString_(
-                attr(
-                    "System Settings → Privacy & Security → Screen & System Audio Recording, "
-                    "switch on “Translation Lens”, then quit and reopen the app.\n\n"
-                    "That permission is what lets the lens see the page underneath it.",
-                    rounded_font(11.5),
-                    C_INK_SOFT,
-                    make_para(lead=3),
-                )
-            )
-            self._speakables = []
-            self.text.textStorage().setAttributedString_(body)
+            self.text.textStorage().setAttributedString_(permission_notice(err))
             self._expand_if_needed()
             return
         if err:
@@ -1854,7 +1481,7 @@ class AppDelegate(NSObject):
     def applicationDidFinishLaunching_(self, note):
         self.lens = Lens.alloc().init()
         self.lens.build()
-        self.lens.text.textStorage().setAttributedString_(_welcome(self.lens.lang))
+        self.lens.text.textStorage().setAttributedString_(welcome(self.lens.lang))
         build_menu()
         self.build_status_item()
         self._hotkey = None
@@ -1898,72 +1525,6 @@ class AppDelegate(NSObject):
             self._hotkey = None
         sys.stderr.write("Translation Lens terminating\n")
         sys.stderr.flush()
-
-
-GREETINGS = {
-    "zh": "你好!",
-    "ja": "こんにちは!",
-    "ko": "안녕하세요!",
-    "fr": "Bonjour !",
-    "es": "¡Hola!",
-    "it": "Ciao!",
-    "de": "Hallo!",
-    "pt": "Olá!",
-    "cs": "Ahoj!",
-    "tr": "Merhaba!",
-    "la": "Salve!",
-}
-
-
-def _welcome(lang):
-    s = NSMutableAttributedString.alloc().init()
-    s.appendAttributedString_(
-        attr(
-            GREETINGS.get(lang.code, "Hello!") + " ",
-            word_font(lang, 17),
-            C_DEEP,
-            make_para(after=4),
-        )
-    )
-    s.appendAttributedString_(
-        attr(
-            "Drag me onto a word.\n", rounded_font(14, True), C_DEEP, make_para(after=6)
-        )
-    )
-    for line in (
-        "Move the pink frame over Chinese text and let go — I read whatever "
-        "is underneath and show pinyin + meanings here.",
-        "Resize the frame with the three pink handles on it: the right edge "
-        "for width, the bottom edge for height, the corner for both. Shrink it "
-        "onto a single character, or open it out over a whole bubble.",
-        "The ⤢ button has quick sizes — Character, Word, Line, Bubble.",
-        "The globe button switches language: Chinese, Japanese, Korean, "
-        "French, Spanish, Italian, German. Your choice is remembered.",
-        "The magnifier button re-reads without moving; the chevron folds this "
-        "panel away so only the frame is left.",
-    ):
-        s.appendAttributedString_(
-            attr(
-                "· " + line + "\n",
-                rounded_font(11.5),
-                C_INK_SOFT,
-                make_para(head=10, after=4, lead=2.5),
-            )
-        )
-    if lang.code == "zh":
-        s.appendAttributedString_(
-            attr(
-                "\nPinyin is colored by tone:  ",
-                rounded_font(10, True),
-                C_INK_SOFT,
-                make_para(before=6),
-            )
-        )
-        for n, label in ((1, "mā"), (2, "má"), (3, "mǎ"), (4, "mà"), (5, "ma")):
-            s.appendAttributedString_(
-                attr(label + "  ", rounded_font(12, True), TONE_COLORS[n])
-            )
-    return s
 
 
 def build_menu():

@@ -25,3 +25,12 @@ tlens = "translation_lens_macos:main"
 [build-system]
 requires = ["uv_build>=0.12.1,<0.13.0"]
 build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "ruff>=0.16.4",
+    "ty>=0.0.74",
+]
+
+[tool.ty.rules]
+unresolved-import = "ignore"
