@@ -1744,12 +1744,36 @@ class Lens(NSObject):
         self.showLens_(None)
         NSApp.deactivate()
 
+    @objc.python_method
+    def _results_above_for_screen_rect_(self, rect):
+        """True when the mark sits in the bottom half of its screen."""
+        cx = float(rect.origin.x) + float(rect.size.width) / 2.0
+        cy = float(rect.origin.y) + float(rect.size.height) / 2.0
+        screen = NSScreen.mainScreen()
+        for s in NSScreen.screens() or ():
+            f = s.frame()
+            if (
+                f.origin.x <= cx < f.origin.x + f.size.width
+                and f.origin.y <= cy < f.origin.y + f.size.height
+            ):
+                screen = s
+                break
+        vis = screen.visibleFrame()
+        mid = vis.origin.y + vis.size.height / 2.0
+        return cy < mid
+
     def placeLensAtScreenRect_(self, rect):
         """Size and park the reading frame so it matches screen rect `rect`."""
         left = float(rect.origin.x)
         top = float(rect.origin.y + rect.size.height)
         w = max(FRAME_W_MIN, min(FRAME_W_MAX, float(rect.size.width)))
         h = max(FRAME_H_MIN, min(FRAME_H_MAX, float(rect.size.height)))
+
+        above = self._results_above_for_screen_rect_(rect)
+        if above != self.results_above:
+            self.results_above = above
+            save_settings(results_above=self.results_above)
+            self._sync_pos_icon()
 
         if not self.expanded:
             self.expanded = True
