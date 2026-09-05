@@ -28,10 +28,10 @@ from .theme import TONE_COLORS
 if TYPE_CHECKING:
     from .langs import Language
 
-_speaker_icon: dict[
-    float, NSImage | None
+_tinted_icons: dict[
+    tuple[str, float], NSImage | None
 ] = {}  # tinted glyphs, cleared whenever the theme changes
-theme.on_change(_speaker_icon.clear)
+theme.on_change(_tinted_icons.clear)
 
 
 # ---------------------------------------------------------------- fonts ---
@@ -89,21 +89,22 @@ def word_font(lang: Language, size: float) -> NSFont:
     return rounded_font(size, True)
 
 
-# ---------------------------------------------------------- speaker icon ---
+# ---------------------------------------------------------- inline icons ---
 
 
-def speaker_icon(size: float = 11.0) -> NSImage | None:
-    """A small pink speaker glyph for inline use in the results panel."""
-    if size in _speaker_icon:
-        return _speaker_icon[size]
+def tinted_symbol(name: str, accessibility: str, size: float) -> NSImage | None:
+    """A small pink SF Symbol glyph for inline use in the results panel."""
+    key = (name, size)
+    if key in _tinted_icons:
+        return _tinted_icons[key]
     img: NSImage | None = None
     try:
         base = NSImage.imageWithSystemSymbolName_accessibilityDescription_(
-            "speaker.wave.2.fill", "speak"
+            name, accessibility
         )
         if base is not None:
             cfg = NSImageSymbolConfiguration.configurationWithPointSize_weight_scale_(
-                size, 0, 1
+                size, 0, 2
             )
             base = base.imageWithSymbolConfiguration_(cfg)
             r = NSMakeRect(0, 0, base.size().width, base.size().height)
@@ -117,15 +118,15 @@ def speaker_icon(size: float = 11.0) -> NSImage | None:
             img.unlockFocus()
     except Exception:
         img = None
-    _speaker_icon[size] = img
+    _tinted_icons[key] = img
     return img
 
 
-def speak_link(index: int, size: float = 11.0) -> NSMutableAttributedString:
-    """Clickable speaker icon; the link carries an index into `speakables`."""
-    img = speaker_icon(size)
+def _icon_link(
+    url: str, img: NSImage | None, fallback: str
+) -> NSMutableAttributedString:
     if img is None:
-        piece = NSMutableAttributedString.alloc().initWithString_("♪")
+        piece = NSMutableAttributedString.alloc().initWithString_(fallback)
     else:
         att = NSTextAttachment.alloc().init()
         att.setImage_(img)
@@ -134,12 +135,26 @@ def speak_link(index: int, size: float = 11.0) -> NSMutableAttributedString:
         )
     piece.addAttributes_range_(
         {
-            NSLinkAttributeName: "speak:%d" % index,
+            NSLinkAttributeName: url,
             NSCursorAttributeName: NSCursor.pointingHandCursor(),
         },
         (0, piece.length()),
     )
     return piece
+
+
+def speaker_icon(size: float = 16.0) -> NSImage | None:
+    return tinted_symbol("speaker.wave.2.fill", "speak", size)
+
+
+def speak_link(index: int, size: float = 16.0) -> NSMutableAttributedString:
+    """Clickable speaker icon; the link carries an index into `speakables`."""
+    return _icon_link("speak:%d" % index, speaker_icon(size), "♪")
+
+
+def copy_link(size: float = 16.0) -> NSMutableAttributedString:
+    """Clickable copy icon; copies the detected text to the clipboard."""
+    return _icon_link("copy:", tinted_symbol("doc.on.doc", "copy", size), "⎘")
 
 
 # --------------------------------------------------------------- credits ---
@@ -252,6 +267,8 @@ def build_results(
     out.appendAttributedString_(
         attr(raw_text, word_font(lang, 14), theme.C_INK, make_para(after=9, lead=3))
     )
+    out.appendAttributedString_(attr(" ", rounded_font(11), theme.C_INK_SOFT))
+    out.appendAttributedString_(copy_link())
     add_speaker(raw_text)
     out.appendAttributedString_(
         attr("\n", word_font(lang, 14), theme.C_INK, make_para(after=9, lead=3))

@@ -66,10 +66,14 @@ from AppKit import (
     NSLinkAttributeName,
     NSColorPanel,
     NSColorSpace,
+    NSPasteboard,
+    NSPasteboardTypeString,
     NSTrackingArea,
     NSTrackingMouseEnteredAndExited,
     NSTrackingMouseMoved,
+    NSTrackingCursorUpdate,
     NSTrackingActiveAlways,
+    NSTrackingInVisibleRect,
     NSStatusBar,
     NSVariableStatusItemLength,
 )
@@ -663,6 +667,83 @@ class PillButton(NSButton):
         return False
 
 
+class ResultsTextView(NSTextView):
+    """Results body. The panel is non-activating, so AppKit cursor rects never
+    fire; a tracking area is what actually shows the pointing hand on icons.
+    """
+
+    def initWithFrame_(self, frame):
+        self = objc.super(ResultsTextView, self).initWithFrame_(frame)
+        if self is None:
+            return None
+        self._hover_track = None
+        return self
+
+    def acceptsFirstMouse_(self, _ev):
+        return True
+
+    def updateTrackingAreas(self):
+        objc.super(ResultsTextView, self).updateTrackingAreas()
+        if self._hover_track is not None:
+            self.removeTrackingArea_(self._hover_track)
+        self._hover_track = NSTrackingArea.alloc().initWithRect_options_owner_userInfo_(
+            self.bounds(),
+            (
+                NSTrackingMouseEnteredAndExited
+                | NSTrackingMouseMoved
+                | NSTrackingActiveAlways
+                | NSTrackingInVisibleRect
+            ),
+            self,
+            None,
+        )
+        self.addTrackingArea_(self._hover_track)
+
+    @objc.python_method
+    def _over_action_link(self, event):
+        loc = self.convertPoint_fromView_(event.locationInWindow(), None)
+        storage = self.textStorage()
+        n = storage.length()
+        if n == 0:
+            return False
+        idx = self.characterIndexForInsertionAtPoint_(loc)
+        if idx >= n:
+            return False
+        link, rng = storage.attribute_atIndex_effectiveRange_(
+            NSLinkAttributeName, idx, None
+        )
+        if link is None:
+            return False
+        lm = self.layoutManager()
+        container = self.textContainer()
+        if lm is None or container is None:
+            return True
+        inset = self.textContainerInset()
+        glyph_range = lm.glyphRangeForCharacterRange_actualCharacterRange_(rng, None)
+        rect = lm.boundingRectForGlyphRange_inTextContainer_(glyph_range, container)
+        return NSPointInRect(
+            loc,
+            NSMakeRect(
+                rect.origin.x + inset.width - 3,
+                rect.origin.y + inset.height - 3,
+                rect.size.width + 6,
+                rect.size.height + 6,
+            ),
+        )
+
+    def mouseEntered_(self, event):
+        self.mouseMoved_(event)
+
+    def mouseMoved_(self, event):
+        if self._over_action_link(event):
+            NSCursor.pointingHandCursor().set()
+        else:
+            NSCursor.arrowCursor().set()
+
+    def mouseExited_(self, _event):
+        NSCursor.arrowCursor().set()
+
+
 # ------------------------------------------------------------- the app ---
 
 
@@ -777,7 +858,7 @@ class Lens(NSObject):
         self.scroll.setHasVerticalScroller_(True)
         self.scroll.setBorderType_(0)
         self.scroll.setAutohidesScrollers_(True)
-        self.text = NSTextView.alloc().initWithFrame_(NSMakeRect(0, 0, 10, 10))
+        self.text = ResultsTextView.alloc().initWithFrame_(NSMakeRect(0, 0, 10, 10))
         self.text.setEditable_(False)
         self.text.setDrawsBackground_(False)
         self.text.setTextContainerInset_(NSMakeSize(13, 10))
@@ -1275,6 +1356,13 @@ class Lens(NSObject):
 
     def textView_clickedOnLink_atIndex_(self, view, link, index):
         target = str(link)
+        if target.startswith("copy:"):
+            text = self._last_text or ""
+            if text:
+                board = NSPasteboard.generalPasteboard()
+                board.clearContents()
+                board.setString_forType_(text, NSPasteboardTypeString)
+            return True
         if not target.startswith("speak:"):
             return False
         try:
