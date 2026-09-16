@@ -236,7 +236,11 @@ def ocr_text(cgimg, lang):
     req.setRecognitionLevel_(0)  # accurate
     req.setRecognitionLanguages_(list(lang.ocr_langs))
     req.setUsesLanguageCorrection_(True)
-    handler = Vision.VNImageRequestHandler.alloc().initWithCGImage_options_(cgimg, {})
+
+    # Pass nil, not a Python {}.  On macOS 27 Vision looks up option keys on
+    # that dict; PyObjC's proxy raises NSInvalidArgumentException ("key does
+    # not exist") instead of returning nil the way NSDictionary does.
+    handler = Vision.VNImageRequestHandler.alloc().initWithCGImage_options_(cgimg, None)
     ok, err = handler.performRequests_error_([req], None)
     if not ok:
         return ""
